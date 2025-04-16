@@ -3,12 +3,16 @@ import os
 import tkinter as tk
 from tkinter import simpledialog, messagebox, ttk
 
-CONNECTION_FILES_DIR = os.path.join(os.path.expanduser("~"), ".config", "gemTerm", "connections")
+CONFIG_DIR = os.path.expanduser("~/.config/gemTerm")
+CONNECTION_FILES_DIR = os.path.join(CONFIG_DIR, "connections")
+
+def _ensure_connections_dir_exists():
+    if not os.path.exists(CONNECTION_FILES_DIR):
+        os.makedirs(CONNECTION_FILES_DIR)
 
 def load_connections():
     connections_data = {}
-    if not os.path.exists(CONNECTION_FILES_DIR):
-        os.makedirs(CONNECTION_FILES_DIR)
+    _ensure_connections_dir_exists()
     for filename in os.listdir(CONNECTION_FILES_DIR):
         if filename.endswith(".gemTerm"):
             unique_id = filename[:-len(".gemTerm")]
@@ -27,8 +31,7 @@ def load_connections():
     return connections_data
 
 def save_connection(unique_id, connection_data):
-    if not os.path.exists(CONNECTION_FILES_DIR):
-        os.makedirs(CONNECTION_FILES_DIR)
+    _ensure_connections_dir_exists()
     filepath = os.path.join(CONNECTION_FILES_DIR, f"{unique_id}.gemTerm")
     try:
         with open(filepath, 'w') as f:
@@ -92,7 +95,7 @@ def add_new_connection(tree, root_node, connections_data):
     else:
         update_auth_fields(None) # Initialize to disabled if no selection
 
-    def save_connection():
+    def save_connection(): # Inner save_connection (command for the button)
         label = entry_vars[0].get()
         conn_type = entry_vars[1].get()
         host = entry_vars[2].get()
@@ -115,8 +118,7 @@ def add_new_connection(tree, root_node, connections_data):
             'auth.password': password,
             'auth.key_file': key_file
         }
-        connections_data[unique_id] = connection_data
-        save_connection(unique_id, connection_data)
+        connections.save_connection(unique_id, connection_data) # Call the module function
         tree.insert(root_node, tk.END, text=label, values=(unique_id,))
         dialog.destroy()
 
@@ -137,13 +139,12 @@ def remove_selected_connection(tree, root_node, connections_data):
     unique_id = tree.item(selected_item[0], 'values')[0]
 
     if unique_id:
-        if messagebox.askyesno("Confirm", f"Are you sure you want to remove '{item_text}'?"):
-            filepath = os.path.join(CONNECTION_FILES_DIR, f"{unique_id}.gemTerm")
-            try:
-                os.remove(filepath)
-                del connections_data[unique_id]
-                tree.delete(selected_item[0])
-            except FileNotFoundError:
-                messagebox.showerror("Error", f"Connection file not found: {filepath}")
-            except Exception as e:
-                messagebox.showerror("Error", f"Error removing connection: {e}")
+        filepath = os.path.join(CONNECTION_FILES_DIR, f"{unique_id}.gemTerm")
+        try:
+            os.remove(filepath)
+            del connections_data[unique_id]
+            tree.delete(selected_item[0])
+        except FileNotFoundError:
+            messagebox.showerror("Error", f"Connection file not found: {filepath}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error removing connection: {e}")
