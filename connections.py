@@ -86,7 +86,7 @@ def add_new_connection(tree, root_node, connections_data):
             entry_vars[5].set("")
             entry_vars[6].set("")
 
-    # Initialize based on default selection (if any)
+    # Initialize the auth fields based on the initial value of the combobox
     if 'auth_type' in entries:
         update_auth_fields(entries['auth_type'].get())
     else:
