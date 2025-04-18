@@ -2,15 +2,15 @@
 import tkinter as tk
 from tkinter import ttk
 from tkinter import font as tkFont
+from tkinter import simpledialog
+from tkinter import messagebox
 import subprocess
 import platform
-import tkinter.messagebox
 import time
-from tkinter import simpledialog
-import connections  # Import the connections module
-import config  # Import the config module
 from PIL import Image, ImageTk
 import os
+import connections  # Import the connections module
+import config  # Import the config module
 
 class TabbedInterface(tk.Tk):
     def __init__(self):
@@ -21,10 +21,8 @@ class TabbedInterface(tk.Tk):
         initial_size = config.get_window_size()
         self.geometry(initial_size)
 
-        # Apply the 'clam' theme directly
         style = ttk.Style(self)
         style.theme_use('clam')
-        print("Using theme: clam")
 
         # Left Frame for the Buttons and Treeview
         self.left_frame = ttk.Frame(self)
@@ -39,16 +37,12 @@ class TabbedInterface(tk.Tk):
 
         # Button to add new connection (+)
         self.add_host_button = ttk.Button(self.button_frame, text="+", width=2,
-                                            command=lambda: connections.add_new_connection(
-                                                self.connections_tree, self.connections_root, self.connections_data
-                                            ))
+            command=lambda: connections.add_new_connection(self.connections_tree, self.connections_root, self.connections_data))
         self.add_host_button.pack(side=tk.LEFT)
 
         # Button to remove selected connection (-)
         self.remove_host_button = ttk.Button(self.button_frame, text="-", width=2,
-                                               command=lambda: connections.remove_selected_connection(
-                                                   self.connections_tree, self.connections_root, self.connections_data
-                                               ))
+            command=lambda: connections.remove_selected_connection(self.connections_tree, self.connections_root, self.connections_data))
         self.remove_host_button.pack(side=tk.LEFT, padx=2)
 
         # Settings Button with Gear Icon
@@ -129,49 +123,58 @@ class TabbedInterface(tk.Tk):
             content_frame.pack(fill=tk.BOTH, expand=True)
             content_frame.grid_columnconfigure(0, weight=1)
             content_frame.grid_rowconfigure(0, weight=1)
+
             self.notebook.add(content_frame, text=tab_name)
             self.notebook.select(content_frame)
-            self.tab_content_frames[tab_name] = content_frame
+            # Store a dictionary containing both the frame and the unique_id
+            self.tab_content_frames[content_frame] = {'unique_id': unique_id, 'tab_name': tab_name}
 
             xterm_title = f"{unique_id}"
             try:
                 font_family = self.default_font['family']
                 font_size = self.default_font['size']
-                process = subprocess.Popen(["xterm", "-T", xterm_title, "-fa", font_family, "-fs", str(font_size)])
+                process = subprocess.Popen(["xterm", "-xrm", "XTerm.vt100.allowTitleOps: false", "-T", xterm_title, "-fa", font_family, "-fs", str(font_size)])
                 pid = process.pid
-                self.xterm_processes[tab_name] = process
+                self.xterm_processes[unique_id] = process # Use unique_id as key here as well?
 
                 def reparent_and_send_command(tab):
-                    content_frame_id = str(self.tab_content_frames[tab].winfo_id())
-                    try:
-                        time.sleep(0.2)  # Give xterm a moment to open
-                        output = subprocess.check_output(["xdotool", "search", "--name", f"^{xterm_title}$"], text=True)
-                        window_ids = output.strip().split('\n')
-                        if window_ids:
-                            xterm_wid = window_ids[0]
-                            subprocess.run(["xdotool", "windowreparent", xterm_wid, content_frame_id])
-                            self.force_xterm_resize(tab)
+                    tab_info = self.tab_content_frames.get(tab)
+                    if tab_info:
+                        current_unique_id = tab_info['unique_id']
+                        content_frame_id = str(tab.winfo_id())
+                        try:
+                            time.sleep(0.2)  # Give xterm a moment to open
+                            output = subprocess.check_output(["xdotool", "search", "--name", f"^{current_unique_id}$"], text=True)
+                            window_ids = output.strip().split('\n')
+                            if window_ids:
+                                xterm_wid = window_ids[0]
+                                subprocess.run(["xdotool", "windowreparent", xterm_wid, content_frame_id])
 
-                            # Send the command to the xterm window
-                            subprocess.run(["xdotool", "type", "--window", xterm_wid, command_to_run])
-                            subprocess.run(["xdotool", "key", "--window", xterm_wid, "Return"])
+                                # Force resize after a small delay to ensure it's reparented
+                                self.after(250, lambda current_tab=tab: self.force_xterm_resize(current_tab))
 
-                            self.monitor_xterm_process(tab, process)
-                        else:
-                            print(f"Warning: Could not find xterm window with title: {xterm_title} to reparent or send command.")
-                    except FileNotFoundError:
-                        print("Warning: xdotool not found. Reparenting and command sending might not work.")
-                    except subprocess.CalledProcessError as e:
-                        print(f"Warning: xdotool failed: {e}")
+                                # Send the command to the xterm window
+                                subprocess.run(["xdotool", "type", command_to_run])
+                                subprocess.run(["xdotool", "key", "Return"])
 
-                self.after(250, lambda current_tab_name=tab_name: reparent_and_send_command(current_tab_name))
-                content_frame.bind("<Configure>", lambda event, current_tab_name=tab_name: self.on_tab_resize(current_tab_name))
+                                self.monitor_xterm_process(current_unique_id, process) # Use unique_id for monitoring
+                            else:
+                                print(f"Warning: Could not find xterm window with title: {current_unique_id} to reparent or send command.")
+                        except FileNotFoundError:
+                            print("Warning: xdotool not found. Reparenting and command sending might not work.")
+                        except subprocess.CalledProcessError as e:
+                            print(f"Warning: xdotool failed: {e}")
+                    else:
+                        print(f"Warning: Could not find tab info for {tab}")
+
+                self.after(250, lambda current_tab=content_frame: reparent_and_send_command(current_tab))
+                content_frame.bind("<Configure>", lambda event, current_tab=content_frame: self.on_tab_resize(current_tab, event))
 
             except FileNotFoundError:
                 tkinter.messagebox.showerror("Error", "xterm not found. Please ensure it is installed.")
                 self.notebook.forget(content_frame)
-                del self.xterm_processes[tab_name]
-                del self.tab_content_frames[tab_name]
+                del self.xterm_processes[unique_id] # Use unique_id for deletion
+                del self.tab_content_frames[content_frame] # Use frame as key
         elif platform.system() == "Windows":
             tkinter.messagebox.showerror("Unsupported Platform", "Launching external terminals is primarily for Linux.")
         elif platform.system() == "Darwin":  # macOS
@@ -179,18 +182,46 @@ class TabbedInterface(tk.Tk):
         else:
             tkinter.messagebox.showerror("Unsupported Platform", f"Launching external terminals is not supported on {platform.system()}.")
 
+    def get_xterm_title(self, tab_frame):
+        tab_info = self.tab_content_frames.get(tab_frame)
+        if tab_info:
+            return tab_info['unique_id']
+        return None
+
+    def close_tab(self, tab_to_close):
+        tab_info = self.tab_content_frames.get(tab_to_close)
+        if tab_info:
+            unique_id = tab_info['unique_id']
+            if unique_id in self.xterm_processes:
+                process = self.xterm_processes[unique_id]
+                print(f"Attempting to kill process: {process}") # Debug print
+                try:
+                    subprocess.run(["kill", "-15", str(process.pid)])
+                    time.sleep(0.1)
+                    subprocess.run(["kill", "-9", str(process.pid)])
+                except FileNotFoundError:
+                    pass
+                except subprocess.CalledProcessError:
+                    pass
+                del self.xterm_processes[unique_id]
+            self.notebook.forget(tab_to_close)
+            del self.tab_content_frames[tab_to_close]
+
     def monitor_xterm_process(self, tab_name, process):
-        if tab_name in self.xterm_processes and self.xterm_processes[tab_name] == process:
-            if process.poll() is not None:
-                # xterm has exited
-                if tab_name in self.tab_content_frames:
-                    tab_to_close = self.tab_content_frames[tab_name]
-                    self.notebook.forget(tab_to_close)
-                    del self.tab_content_frames[tab_name]
+        self.after(100, self._check_process, tab_name, process)
+
+    def _check_process(self, tab_name, process):
+        if process.poll() is not None:
+            # Process has finished
+            if tab_name in self.tab_content_frames:
+                self.notebook.forget(self.tab_content_frames[tab_name])
+                del self.tab_content_frames[tab_name]
+                if tab_name in self.xterm_processes:
                     del self.xterm_processes[tab_name]
-            else:
-                # Continue monitoring after 1 second
-                self.after(1000, self.monitor_xterm_process, tab_name, process)
+            print(f"XTerm for tab '{tab_name}' has exited.")
+        else:
+            # Process is still running, check again after 100ms
+            self.after(100, self._check_process, tab_name, process)
 
     def on_treeview_doubleclick(self, event):
         item_id = self.connections_tree.selection()
@@ -239,15 +270,30 @@ class TabbedInterface(tk.Tk):
                         vnc_command = f"vncviewer {host}"
                         self.create_xterm_process(selected_item_label, vnc_command, unique_id)
                     else:
-                        tkinter.messagebox.showinfo("Info", f"Connection type '{connection_info.get('type')}' not yet supported for {selected_item_label}")
+                        tk.messagebox.showinfo("Info", f"Connection type '{connection_info.get('type')}' not yet supported for {selected_item_label}")
 
                 except FileNotFoundError:
-                    tkinter.messagebox.showerror("Error", f"Connection file not found for {selected_item_label}")
+                    tk.messagebox.showerror("Error", f"Connection file not found for {selected_item_label}")
                 except Exception as e:
-                    tkinter.messagebox.showerror("Error", f"Error reading connection file for {selected_item_label}: {e}")
+                    tk.messagebox.showerror("Error", f"Error reading connection file for {selected_item_label}: {e}")
 
-    def on_tab_resize(self, tab_name):
-        self.force_xterm_resize(tab_name)
+    def on_tab_resize(self, tab_frame, event):
+        if platform.system() == "Linux":
+            tab_info = self.tab_content_frames.get(tab_frame)
+            if tab_info:
+                unique_id = tab_info['unique_id']
+                try:
+                    tab_width = event.width
+                    tab_height = event.height
+                    output = subprocess.check_output(["xdotool", "search", "--name", f"^{unique_id}$"], text=True)
+                    window_ids = output.strip().split('\n')
+                    if window_ids:
+                        xterm_wid = window_ids[0]
+                        subprocess.run(["xdotool", "windowsize", xterm_wid, tab_width, tab_height])
+                except FileNotFoundError:
+                    print("Warning: xdotool not found. Resizing might not work.")
+                except subprocess.CalledProcessError as e:
+                    print(f"Warning: xdotool failed to resize window: {e}")
 
     def force_xterm_resize(self, tab_name):
         if tab_name in self.xterm_processes and tab_name in self.tab_content_frames:
@@ -274,9 +320,6 @@ class TabbedInterface(tk.Tk):
                             else:
                                 print(f"Warning: xdotool search failed after retries: {e}")
                                 return
-
-    def get_xterm_title(self, tab_name):
-        return f"XTerm - {tab_name}"
 
 if __name__ == "__main__":
     app = TabbedInterface()
