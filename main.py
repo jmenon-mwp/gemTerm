@@ -11,6 +11,7 @@ from PIL import Image, ImageTk
 import os
 import connections  # Import the connections module
 import config  # Import the config module
+import tempfile
 
 class TabbedInterface(tk.Tk):
     def __init__(self):
@@ -142,9 +143,25 @@ class TabbedInterface(tk.Tk):
                     username = connection_info.get('auth.username', '')
                     hostname = connection_info.get('host', '')
                     full_hostname = f"{username}@{hostname}" if username else hostname
-                    xterm_command = f"env SSHPASS='{password}' sshpass -e ssh -o StrictHostKeyChecking=no {full_hostname}"
-                    full_command = xterm_args + ["-e", f"{xterm_command}"]
-                    process = subprocess.Popen(full_command, env=env)
+                    # xterm_command = f"env SSHPASS='{password}' sshpass -e ssh -o StrictHostKeyChecking=no {full_hostname}"
+                    # full_command = xterm_args + ["-e", f"{xterm_command}"]
+                    # process = subprocess.Popen(full_command, env=env)
+                    try:
+                        temp_script_file = tempfile.NamedTemporaryFile(mode='w', delete=False) # delete=False
+                        script_content = f"#!/bin/bash\n"
+                        script_content += f"export SSHPASS='{password}'\n"
+                        script_content += f"sshpass -e ssh -o StrictHostKeyChecking=no '{full_hostname}'\n"
+                        temp_script_file.write(script_content)
+                        temp_script_file.flush()
+                        os.chmod(temp_script_file.name, 0o700)  # Make the script executable
+                        full_command = xterm_args + ["-e", f"bash '{temp_script_file.name}'"]
+                        process = subprocess.Popen(full_command, env=env, preexec_fn=lambda: os.close(temp_script_file.fileno())) # Close our handle
+                    except Exception as e:
+                        print(f"Error creating temporary script: {e}")
+                        if temp_script_file:
+                            os.remove(temp_script_file.name) # Ensure cleanup on error
+                    self.after(1000, os.remove, temp_script_file.name)
+
                 elif connection_info and connection_info.get('type') == 'SSH':
                     # Default SSH command without sshpass
                     username = connection_info.get('auth.username', '')
